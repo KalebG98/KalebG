@@ -1,0 +1,446 @@
+;*****************************************************************
+;* This stationery serves as the framework for a                 *
+;* user application (single file, absolute assembly application) *
+;* For a more comprehensive program that                         *
+;* demonstrates the more advanced functionality of this          *
+;* processor, please see the demonstration applications          *
+;* located in the examples subdirectory of the                   *
+;* Freescale CodeWarrior for the HC12 Program directory          *
+;*****************************************************************
+
+; export symbols
+            XDEF Entry, _Startup            ; export 'Entry' symbol
+            ABSENTRY Entry        ; for absolute assembly: mark this as application entry point
+
+
+
+; Include derivative-specific definitions 
+		INCLUDE 'derivative.inc' 
+
+ROMStart    EQU  $4000  ; absolute address to place my code/constant data
+
+SECOne: EQU 61
+Zero: EQU 0
+Two: EQU 2
+Four: EQU 4
+Five: EQU 5
+Nine: EQU 9
+Thirty: EQU 30
+SECThree: EQU 183
+HalfSEC: EQU 30
+
+; variable/data section
+
+            ORG RAMStart
+ ; Insert here your data definition.
+
+  Counter: DS.B 1
+  HourL: DS.B 1
+  HourR: DS.B 1
+  MinuteL: DS.B 1
+  MinuteR: DS.B 1
+  SecondL: DS.B 1
+  SecondR: DS.B 1
+  SEC3Enable: DS.B 1
+  SEC3: DS.B 1
+  BlinkCount: DS.B 1
+  Button1: DS.B 1
+  
+
+; code section
+            ORG   ROMStart
+
+
+Entry:
+_Startup:
+            LDS   #RAMEnd+1       ; initialize the stack pointer
+
+            CLI                     ; enable interrupts
+            
+            LDAA #%10000000         ;Enable digital input
+            STAA ATDDIEN
+            
+            LDAA #%01111111         ;Set PortAD (6-0) as output and PortAD7 as input 
+            STAA DDRAD
+            STAA DDRT               ;Set PortT (6-0) as output and PortT7 as input
+            
+            LDAA #%00111111         ;Set PortM (5-0) as output
+            STAA DDRM
+            
+            LDAA #$FF               ;Set PortA pin PA0 as output
+            STAA DDRA
+            
+            LDAA #$FF                ;Enable displays to be turned on
+            STAA PORTA
+           
+            LDAA #$00               ;Output all zeroes
+            STAA PTAD
+            STAA PTT
+            
+            MOVB #SECOne, Counter     ;Restart the value of Counter to the amount needed for a 1-second delay             
+            MOVB #Zero, HourL         ;Initialize all times at zero 
+            MOVB #Zero, HourR
+            MOVB #Zero, MinuteL
+            MOVB #Zero, MinuteR
+            MOVB #Zero, SecondL
+            MOVB #Zero, SecondR
+            MOVB #Zero, SEC3Enable
+            MOVB #Zero, SEC3
+            MOVB #Thirty, BlinkCount
+            
+InitInterrupt:
+ 
+              LDAA #%10000000        ;Enable the timer
+              STAA TSCR1
+            
+              LDAA #%10000000        ;Reset time overflow flag (TOF) 
+              STAA TFLG2              
+            
+              LDAA #%10000001        ;Enable the interrupt (TOI)
+              STAA TSCR2      
+                            
+
+MainLoop:     WAI                     ;Wait for interrupt
+ 
+              LDAA PTAD                ;Read PortAD and store value in ButtonOne
+              STAA Button1
+              BCLR Button1, %01111111  ;Clear the seven least significant bits of Button1
+              LDAA #$00                ;If the button is pressed, branch to BPressed
+              CMPA Button1
+              LBEQ BPressed
+              
+              LDAA #$00                ;Make SEC3 Enable 0 again
+              STAA SEC3Enable
+              
+              BRA MainLoop
+
+Delay:        nop 
+
+              DEC BlinkCount
+             ; LDAA #$00
+             ; CMPA BlinkCount
+             ; BEQ BlinkCount30 
+              
+;ContinueDelay:              
+              DEC Counter               ;Decrease the value of Counter
+              LDAA #$00 
+              CMPA Counter
+              BEQ DisplaySeconds        ;If Counter is zero, the second has passed, so branch to DisplaySeconds 
+              
+              LDAA #%10000000            ;Reset time overflow flag (TOF) 
+              STAA TFLG2 
+                
+              RTI                       ;If Counter is not zero, the second hasn't passed so the counter needs to be decreased more
+                                        ;Return to the line after Wai     
+;BlinkCount30: 
+ ;              MOVB #Thirty, BlinkCount  
+  ;             BRA ContinueDelay  
+              
+DisplaySeconds:
+
+              LDAA SecondR              ;Compare SecondR to nine.
+              CMPA #Nine
+              BHS ResetSecondR          ;If SecondR is greater than or equal to nine, branch to ResetSeconds
+              
+              INC SecondR               ;If SecondR is lower than nine, increase its value 
+              BRA OutputSeconds
+             
+          
+ResetSecondR:     
+             LDAA #$00                  ;Make SecondR equal to zero
+             STAA SecondR
+             
+             LDAA SecondL               ;Compare SecondL to five
+             CMPA #Five                    
+             BHS ResetSecondL           ;If SecondL is greather than or equal to five, branch to ResetSecond L
+             
+             INC SecondL                ;If Second L is lower than five, increase its value          
+             BRA OutputSeconds 
+              
+ResetSecondL:
+             LDAA #$00                  ;Make SecondL equal to zero
+             STAA SecondL
+             
+             INC MinuteR                ;Increase MinuteR (increase one minute)
+             BRA OutputSeconds
+ 
+OutputSeconds:
+ 
+             LDAA SecondL               ;Load SecondL on accumulator A              
+             LSLA                       ;Shift SecondL four times to make sure its value is on Port AD pins 6,5,4
+             LSLA
+             LSLA
+             LSLA  
+             ADDA SecondR               ;Add SecondL and SecondR to get total second results in accumulator A
+             STAA PTAD                  ;Output the seconds
+             
+             BRA DisplayMinutes
+             
+DisplayMinutes: 
+ 
+             LDAA MinuteR              ;Compare MinuteR to nine.
+             CMPA #Nine
+             BHI ResetMinuteR          ;If MinuteR is greater than nine, branch to ResetMinuteR
+              
+             BRA OutputMinutes 
+             
+ResetMinuteR:
+             LDAA #$00                  ;Make MinuteR equal to zero
+             STAA MinuteR
+             
+             LDAA MinuteL               ;Compare MinuteL to five
+             CMPA #Five                    
+             BHS ResetMinuteL           ;If MinuteL is greather than or equal to five, branch to ResetMinuteL
+             
+             INC MinuteL                ;If Minute L is lower than five, increase its value          
+             BRA OutputMinutes 
+             
+ResetMinuteL:
+             LDAA #$00                  ;Make MinuteL equal to zero
+             STAA MinuteL
+             
+             INC HourR                ;Increase HourR (increase one hour)
+             
+             BRA OutputMinutes 
+             
+OutputMinutes:       
+ 
+             LDAA MinuteL               ;Load MinuteL on accumulator A              
+             LSLA                       ;Shift MinuteL four times to make sure its value is on PortT pins 6,5,4
+             LSLA
+             LSLA
+             LSLA  
+             ADDA MinuteR               ;Add MinuteL and MinuteR to get total minute result in accumulator A
+             STAA PTT                   ;Output the minutes
+ 
+             BRA DisplayHours
+             
+DisplayHours:
+             LDAA HourL               ;Compare if HourL is two
+             CMPA #Two                ;If HourL is greater than or equal to two, branch to DisplayHours 2 
+             BHS DisplayHours2
+             
+             
+             LDAA HourR              ;Compare HourR to nine.
+             CMPA #Nine
+             BHI ResetHourR          ;If HourR is greater than nine, branch to ResetHourR
+              
+             BRA OutputHours 
+             
+ResetHourR:
+             LDAA #$00                  ;Make HourR equal to zero
+             STAA HourR
+             
+             LDAA HourL               ;Compare HourL to two
+             CMPA #Two                    
+             BHS ResetHourL           ;If HourL is greather than or equal to two, branch to ResetHourL
+             
+             
+             INC HourL                ;If HourL is lower than two, increase its value          
+             BRA OutputHours 
+             
+ResetHourL:
+             LDAA #$00                ;Make HourL equal to zero
+             STAA HourL
+             
+             BRA OutputHours              
+             
+OutputHours: 
+ 
+             LDAA HourL               ;Load HourL on accumulator A              
+             LSLA                     ;Shift HourL four times to make sure its value is on PortT pins 6,5,4
+             LSLA
+             LSLA
+             LSLA  
+             ADDA HourR                ;Add HourL and HourR to get total minute result in accumulator A
+             STAA PTM                   ;Output the hours
+ 
+             MOVB #SECOne, Counter      ;Restart the value of Counter to the amount needed for a 1-second delay
+              
+             LDAA #%10000000            ;Reset time overflow flag (TOF) 
+             STAA TFLG2                                   
+             
+             RTI                        ;Return to the line after Wai
+             
+DisplayHours2:
+             
+             LDAA HourR                 ;Compare HourR to four
+             CMPA #Four                 ;If HourR is greater than four, branch to ResetHourR
+             BHS ResetHourR
+             
+             BRA OutputHours            ;Else, branch to output Hours
+             
+BPressed:  
+              LDAA #%00000001           ;If SEC3Enable equals 1, branch to ContBPressed
+              CMPA SEC3Enable
+              BEQ ContBPressed
+              MOVB #SECThree, SEC3      ;Else, make SEC3 equal to 183 and SECEnable3 equal to 1
+              LDAA #%00000001
+              STAA SEC3Enable
+            
+ContBPressed: 
+              DEC SEC3                   ;Decrease SEC3 
+              LDAA #$00                  ;If SEC3 equals zero, the 3 seconds have passed, so branch to ResetSEC3Enable 
+              CMPA SEC3
+              BEQ ResetSEC3Enable
+              LBRA MainLoop               ;Else, branch to MainLoop
+              
+ResetSEC3Enable:  
+                LDAA #$00                ;Make SEC3 Enable 0 again
+                STAA SEC3Enable
+                
+
+
+
+
+
+
+
+
+BlinkOff2: 
+            LDAA #$00                    ;Disable all displays
+            STAA PORTA
+            ;BRCLR PTAD, %10000000, BlinkOn2  ;If Button is pressed, go to BlinkOn2         THIS IS THE MISTAKE. CORRECT IT  
+            
+ DelayOff:                        
+            LDAB #$0000
+ Delay4:
+            LDX #$0000
+ Delay5:
+            
+            
+            INX  
+            CPX #$FFFF
+            BEQ DBCounter2
+            BRA Delay5
+            
+            
+ DBCounter2: 
+ 
+                        
+            BRCLR PORTB, %00010000, ModifyHoursOff    ;Check if the hour increase button was pressed 
+
+BlinkOff3: 
+            BRCLR PTIT, %10000000, ModifyMinutesOff    ;Check if the minute increase button was pressed         
+BlinkOff4:
+            
+            INCB 
+            CMPB #8
+            BEQ Done1
+            BRA Delay4
+ 
+ Done1:  
+        BRA BlinkOn2 
+        
+        
+                              
+
+
+
+
+
+
+
+
+
+
+BlinkOn2: 
+             LDAA #$FF                ;Enable displays to be turned on
+             STAA PORTA 
+             
+ DelayOn:                          
+            LDAB #$0000
+ Delay0:
+            LDX #$0000
+ Delay1:
+
+            INX  
+            CPX #$FFFF
+            BEQ DBCounter
+            BRA Delay1
+            
+ DBCounter: 
+                        ;Check if PB1 is pressed to exit blinking                     
+             LDAA PTAD                ;Read PortAD and store value in ButtonOne
+             STAA Button1
+             BCLR Button1, %01111111  ;Clear the seven least significant bits of Button1
+             LDAA #$00                ;If the button is pressed, branch to MainLoop
+             CMPA Button1             
+             LBEQ MainLoop            
+                                      ;Else, continue
+ 
+             BRCLR PORTB, %00010000, ModifyHoursOn    ;Check if the hour increase button was pressed
+BlinkOn3:
+             BRCLR PTIT, %10000000, ModifyMinutesOn    ;Check if the minute increase button was pressed                         
+BlinkOn4:    
+   
+            INCB 
+            CMPB #8
+            BEQ Done
+            BRA Delay0
+ 
+ Done:  
+        BRA BlinkOff2              ;Else, branch to BlinkOff2     
+                                      
+             
+           
+        
+
+
+             
+ModifyHoursOff: 
+              INC HourR
+              JSR Debouncer            ;Do a small delay  
+              
+              BRA BlinkOff3
+              
+ModifyMinutesOff: 
+              INC MinuteR
+              JSR Debouncer            ;Do a small delay
+              BRA BlinkOff4
+ 
+ModifyHoursOn: 
+              INC HourR
+              JSR Debouncer            ;Do a small delay
+              BRA BlinkOn3
+              
+ModifyMinutesOn:
+              INC MinuteR 
+              JSR Debouncer            ;Do a small delay
+              BRA BlinkOn4
+                          
+                                        
+
+        
+        
+                                                                                 
+                        
+ ;Button debouncer                       
+                                        
+ Debouncer:                           ;The debouncer allows for a delay so that the buttons to increase minnutes and hours are only pressed once
+            LDAB #$0000
+ Delay2:
+            LDX #$0000
+ Delay3:
+            INX  
+            CPX #$FFFF
+            BEQ DBCounter1
+            BRA Delay3
+            
+ DBCounter1:   
+            INCB 
+            CMPB #3
+            BEQ Done2
+            BRA Delay2
+ 
+ Done2:  
+        RTS           
+             
+;**************************************************************
+;*                 Interrupt Vectors                          *
+;**************************************************************
+            ORG   $FFDE           ;Initialize the vector for the TOF interrupt
+            DC.W  Delay
+            
+            ORG   $FFFE
+            DC.W  Entry           ; Reset Vector
